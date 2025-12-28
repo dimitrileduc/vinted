@@ -3,10 +3,6 @@
     <header>
       <h1>Bulk Photo Factory</h1>
       <p>Remove backgrounds from Vinted photos while preserving defects</p>
-      <label class="toggle-qa">
-        <input type="checkbox" v-model="skipQA" />
-        Skip QA (faster)
-      </label>
     </header>
 
     <main>
@@ -48,12 +44,10 @@
           <span :class="['step', { active: currentStep >= 2, done: currentStep > 2 }]">
             {{ currentStep > 2 ? '✅' : '🎨' }} Agent 2: Inpaint
           </span>
-          <template v-if="!skipQA">
-            <span class="step-arrow">→</span>
-            <span :class="['step', { active: currentStep >= 3, done: currentStep > 3 }]">
-              {{ currentStep > 3 ? '✅' : '🔍' }} Agent 3: QA
-            </span>
-          </template>
+          <span class="step-arrow">→</span>
+          <span :class="['step', { active: currentStep >= 3, done: currentStep > 3 }]">
+            {{ currentStep > 3 ? '✅' : '🔍' }} Agent 3: QA
+          </span>
         </div>
       </section>
 
@@ -146,7 +140,6 @@ const isProcessing = ref(false)
 const statusMessage = ref('')
 const currentStep = ref(0)
 const results = ref<ProcessResult[]>([])
-const skipQA = ref(true) // Skip QA by default for faster dev
 const showModal = ref(false)
 const selectedForensicLog = ref<any>(null)
 
@@ -198,7 +191,7 @@ async function processFiles(files: File[]) {
         }
       }, 8000) // Each step ~8s
 
-      const response = await fetch(`/api/process${skipQA.value ? '?skipQA=true' : ''}`, {
+      const response = await fetch('/api/process', {
         method: 'POST',
         body: formData
       })
@@ -295,22 +288,6 @@ header h1 {
 
 header p {
   color: #666;
-}
-
-.toggle-qa {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
-  padding: 0.5rem 1rem;
-  background: #e8f4ff;
-  border-radius: 20px;
-  cursor: pointer;
-  font-size: 0.875rem;
-}
-
-.toggle-qa input {
-  cursor: pointer;
 }
 
 .upload-section {

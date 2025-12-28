@@ -1,10 +1,8 @@
-import { readMultipartFormData, createError, getQuery } from 'h3'
+import { readMultipartFormData, createError } from 'h3'
 import { processImage, type PipelineConfig } from '../../src/pipeline'
 
 export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig(event)
-  const query = getQuery(event)
-  const skipQA = query.skipQA === 'true' || query.skipQA === '1'
 
   // Validate configuration
   if (!config.googleApiKey || !config.gcpProjectId) {
@@ -58,8 +56,7 @@ export default defineEventHandler(async (event) => {
       image_buffer: imageFile.data,
       image_name: imageFile.filename || 'uploaded_image.jpg'
     },
-    pipelineConfig,
-    { skipQA }
+    pipelineConfig
   )
 
   if (!result.success) {
