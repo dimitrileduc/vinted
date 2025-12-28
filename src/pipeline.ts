@@ -68,10 +68,11 @@ export async function processImage(
     console.log(`[${imageId}] Agent 2: Edited image saved (${inpaintResult.processing_time_ms}ms)`)
 
     // ===== AGENT 3: QA Validation =====
+    // QA sur inpainted_buffer (même résolution que original) pas sur outpainted
     console.log(`[${imageId}] Agent 3: Running QA validation...`)
     const qaResult = await validateEdit(
       input.image_buffer,
-      inpaintResult.edited_buffer,
+      inpaintResult.inpainted_buffer,  // QA sur inpaint (avant outpaint)
       maskResult.mask_buffer,
       imageId,
       {

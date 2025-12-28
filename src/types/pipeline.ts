@@ -9,8 +9,9 @@ export interface MaskResult {
 
 // Agent 2: Inpaint Output
 export interface InpaintResult {
-  edited_buffer: Buffer
+  edited_buffer: Buffer       // Final result (outpainted if enabled)
   edited_base64: string
+  inpainted_buffer: Buffer    // Pre-outpaint result (for QA - same resolution as original)
   processing_time_ms: number
   model_version: string
   smart_prompt: string
