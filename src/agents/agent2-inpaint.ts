@@ -3,81 +3,11 @@ import { VertexAI } from '@google-cloud/vertexai'
 import sharp from 'sharp'
 import type { InpaintResult } from '../types/pipeline'
 
-// Configuration outpainting
-const TARGET_OBJECT_RATIO = 0.85 // Objet = 85% du frame (best practice ecommerce)
-const MIN_OUTPAINT_SCALE = 1.1 // Minimum 10% de padding
-const MAX_OUTPAINT_SCALE = 2.0 // Maximum 100% de padding
-const MAX_OUTPAINT_DIMENSION = 2048 // Limite Imagen 3
+// Limite Imagen 3
+const MAX_OUTPAINT_DIMENSION = 2048
 
-// Vinted optimal dimensions
-const VINTED_WIDTH = 1000
-const VINTED_HEIGHT = 1500 // Ratio 2:3 portrait
-
-// 📐 Analyser le mask pour trouver la bounding box de l'objet
-async function analyzeObjectBounds(maskBuffer: Buffer): Promise<{
-  bbox: { x: number, y: number, width: number, height: number },
-  objectRatio: number,
-  imageWidth: number,
-  imageHeight: number
-}> {
-  const { data, info } = await sharp(maskBuffer)
-    .grayscale()
-    .raw()
-    .toBuffer({ resolveWithObject: true })
-
-  const { width, height } = info
-  let minX = width, minY = height, maxX = 0, maxY = 0
-  let objectPixels = 0
-
-  // Parcourir les pixels - noir (< 128) = objet
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const pixel = data[y * width + x]
-      if (pixel < 128) { // Noir = objet
-        objectPixels++
-        if (x < minX) minX = x
-        if (x > maxX) maxX = x
-        if (y < minY) minY = y
-        if (y > maxY) maxY = y
-      }
-    }
-  }
-
-  // Si pas d'objet trouvé, utiliser toute l'image
-  if (maxX < minX || maxY < minY) {
-    return {
-      bbox: { x: 0, y: 0, width, height },
-      objectRatio: 1.0,
-      imageWidth: width,
-      imageHeight: height
-    }
-  }
-
-  const bboxWidth = maxX - minX + 1
-  const bboxHeight = maxY - minY + 1
-
-  // Ratio = max(largeur objet / largeur image, hauteur objet / hauteur image)
-  const objectRatio = Math.max(bboxWidth / width, bboxHeight / height)
-
-  return {
-    bbox: { x: minX, y: minY, width: bboxWidth, height: bboxHeight },
-    objectRatio,
-    imageWidth: width,
-    imageHeight: height
-  }
-}
-
-// 🧮 Calculer le scale adaptatif pour atteindre 85% target
-function calculateAdaptiveScale(currentObjectRatio: number): number {
-  // Si objet = 60% et target = 85%, on veut scale = 60/85 = 0.7
-  // Mais scale est pour agrandir le canvas, donc scale = 1/0.7 = 1.43
-  const neededScale = currentObjectRatio / TARGET_OBJECT_RATIO
-
-  // Clamp entre min et max
-  const scale = Math.max(MIN_OUTPAINT_SCALE, Math.min(MAX_OUTPAINT_SCALE, 1 / neededScale))
-
-  return scale
-}
+// Vinted ratio 2:3 (portrait)
+const VINTED_RATIO = 1.5 // height / width
 
 const DEFAULT_PROMPT = "Warm honey-toned herringbone parquet floor catching soft afternoon light, cream plastered walls with subtle texture, cozy lived-in Parisian apartment atmosphere, gentle natural shadows"
 
@@ -244,57 +174,44 @@ export async function inpaintBackground(
     console.log(`   ✅ Inpainting successful!`)
     console.log(`   📦 Inpainted size: ${(inpaintedBuffer.length / 1024).toFixed(1)} KB`)
 
-    // 3. 🔳 Outpainting: Étendre l'image avec padding adaptatif
-    console.log(`   🔳 Step 3: Outpainting with adaptive padding...`)
-
-    // Analyser le mask pour calculer le ratio objet/image
-    const objectAnalysis = await analyzeObjectBounds(maskBuffer)
-    console.log(`   📊 Object ratio: ${(objectAnalysis.objectRatio * 100).toFixed(1)}% of frame`)
-    console.log(`   📦 Object bbox: ${objectAnalysis.bbox.width}x${objectAnalysis.bbox.height}`)
-
-    // Calculer le scale adaptatif pour atteindre 85% target
-    const adaptiveScale = calculateAdaptiveScale(objectAnalysis.objectRatio)
-    console.log(`   🎯 Target: ${TARGET_OBJECT_RATIO * 100}% → Adaptive scale: ${adaptiveScale.toFixed(2)}x`)
+    // 3. 🔳 Outpainting: Étendre l'image vers ratio Vinted 2:3
+    console.log(`   🔳 Step 3: Outpainting to Vinted 2:3 ratio...`)
 
     // Get dimensions of inpainted image
     const inpaintedMeta = await sharp(inpaintedBuffer).metadata()
     let origWidth = inpaintedMeta.width!
     let origHeight = inpaintedMeta.height!
+    console.log(`   📐 Original: ${origWidth}x${origHeight}`)
 
-    // Resize if image is too large for Imagen (après outpaint)
+    // Resize si trop grand pour Imagen
     let resizedInpainted = inpaintedBuffer
     const maxDim = Math.max(origWidth, origHeight)
-    const scaledMaxDim = maxDim * adaptiveScale
-
-    if (scaledMaxDim > MAX_OUTPAINT_DIMENSION) {
-      // Resize pour que l'image outpaintée ne dépasse pas la limite
-      const resizeScale = MAX_OUTPAINT_DIMENSION / scaledMaxDim
-      origWidth = Math.round(origWidth * resizeScale)
-      origHeight = Math.round(origHeight * resizeScale)
+    if (maxDim > MAX_OUTPAINT_DIMENSION) {
+      const scale = MAX_OUTPAINT_DIMENSION / maxDim
+      origWidth = Math.round(origWidth * scale)
+      origHeight = Math.round(origHeight * scale)
       resizedInpainted = await sharp(inpaintedBuffer)
         .resize(origWidth, origHeight)
         .jpeg({ quality: 90 })
         .toBuffer()
-      console.log(`   📏 Resized for outpaint limit: ${origWidth}x${origHeight}`)
+      console.log(`   📏 Resized for Imagen limit: ${origWidth}x${origHeight}`)
     }
 
-    // Calculate new dimensions with adaptive scale + Vinted 2:3 ratio
-    const VINTED_RATIO = VINTED_HEIGHT / VINTED_WIDTH // 1.5 (portrait)
+    // Calculer nouvelles dimensions pour ratio 2:3 (portrait Vinted)
+    // On étend MINIMALEMENT pour atteindre le ratio 2:3
+    let newWidth = origWidth
+    let newHeight = origHeight
+    const currentRatio = origHeight / origWidth
 
-    let newWidth = Math.round(origWidth * adaptiveScale)
-    let newHeight = Math.round(origHeight * adaptiveScale)
-
-    // Ajuster pour ratio 2:3 (portrait Vinted) - étendre le plus petit côté
-    const currentRatio = newHeight / newWidth
     if (currentRatio < VINTED_RATIO) {
-      // Trop large → plus de padding vertical
-      newHeight = Math.round(newWidth * VINTED_RATIO)
+      // Image trop large → ajouter du padding vertical (haut/bas)
+      newHeight = Math.round(origWidth * VINTED_RATIO)
     } else if (currentRatio > VINTED_RATIO) {
-      // Trop haut → plus de padding horizontal
-      newWidth = Math.round(newHeight / VINTED_RATIO)
+      // Image trop haute → ajouter du padding horizontal (gauche/droite)
+      newWidth = Math.round(origHeight / VINTED_RATIO)
     }
 
-    console.log(`   📐 Canvas ratio 2:3: ${newWidth}x${newHeight}`)
+    console.log(`   📐 Canvas 2:3: ${newWidth}x${newHeight}`)
 
     // Calculate offset to center the original image
     const offsetX = Math.round((newWidth - origWidth) / 2)
@@ -390,33 +307,22 @@ export async function inpaintBackground(
     }
 
     const outpaintedBuffer = Buffer.from(finalBase64, 'base64')
-    console.log(`   ✅ Outpainting successful!`)
-    console.log(`   📦 Outpainted size: ${(outpaintedBuffer.length / 1024).toFixed(1)} KB`)
-
-    // 4. 📱 Resize final vers format Vinted optimal (1000x1500, ratio 2:3)
-    console.log(`   📱 Step 4: Resizing to Vinted format ${VINTED_WIDTH}x${VINTED_HEIGHT}...`)
-
-    const finalBuffer = await sharp(outpaintedBuffer)
-      .resize(VINTED_WIDTH, VINTED_HEIGHT, {
-        fit: 'contain',           // Garde tout, pas de crop
-        background: { r: 255, g: 255, b: 255 } // Blanc si besoin de padding
-      })
-      .jpeg({ quality: 92 })
-      .toBuffer()
-
     const processingTime = Date.now() - startTime
 
-    console.log(`   ✅ Final Vinted image ready!`)
-    console.log(`   📦 Final size: ${(finalBuffer.length / 1024).toFixed(1)} KB`)
-    console.log(`   📐 Dimensions: ${VINTED_WIDTH}x${VINTED_HEIGHT}`)
+    // Get final dimensions
+    const finalMeta = await sharp(outpaintedBuffer).metadata()
+
+    console.log(`   ✅ Outpainting successful!`)
+    console.log(`   📦 Final size: ${(outpaintedBuffer.length / 1024).toFixed(1)} KB`)
+    console.log(`   📐 Dimensions: ${finalMeta.width}x${finalMeta.height}`)
     console.log(`   ⏱️  Total time: ${processingTime}ms`)
 
     return {
-      edited_buffer: finalBuffer,
-      edited_base64: finalBuffer.toString('base64'),
-      inpainted_buffer: inpaintedBuffer,  // Pour QA (même résolution que original)
+      edited_buffer: outpaintedBuffer,
+      edited_base64: finalBase64,
+      inpainted_buffer: inpaintedBuffer,
       processing_time_ms: processingTime,
-      model_version: 'imagen-3.0 + gemini-2.0-flash + outpaint + vinted-resize',
+      model_version: 'imagen-3.0 + gemini-2.0-flash + outpaint',
       smart_prompt: finalPrompt,
       success: true
     }
