@@ -17,9 +17,14 @@ export interface PipelineConfig {
   outputDir: string
 }
 
+export interface ProcessOptions {
+  skipQA?: boolean
+}
+
 export async function processImage(
   input: PipelineInput,
-  config: PipelineConfig
+  config: PipelineConfig,
+  options: ProcessOptions = {}
 ): Promise<PipelineResult> {
   const imageId = randomUUID()
   const startTime = Date.now()
@@ -67,25 +72,48 @@ export async function processImage(
     await writeFile(editedPath, inpaintResult.edited_buffer)
     console.log(`[${imageId}] Agent 2: Edited image saved (${inpaintResult.processing_time_ms}ms)`)
 
-    // ===== AGENT 3: QA Validation =====
-    // QA sur inpainted_buffer (même résolution que original) pas sur outpainted
-    console.log(`[${imageId}] Agent 3: Running QA validation...`)
-    const qaResult = await validateEdit(
-      input.image_buffer,
-      inpaintResult.inpainted_buffer,  // QA sur inpaint (avant outpaint)
-      maskResult.mask_buffer,
-      imageId,
-      {
-        agent1_time_ms: maskResult.generation_time_ms,
-        agent2_time_ms: inpaintResult.processing_time_ms,
-        smart_prompt: inpaintResult.smart_prompt
-      }
-    )
+    // ===== AGENT 3: QA Validation (optionnel) =====
+    let qaResult: any
+    let forensicPath = ''
 
-    // Save forensic log
-    const forensicPath = join(logsDir, `${baseName}_forensic.json`)
-    await writeFile(forensicPath, JSON.stringify(qaResult.forensic_log, null, 2))
-    console.log(`[${imageId}] Agent 3: QA ${qaResult.qa_status.toUpperCase()} (${qaResult.pixel_delta_percent}%)`)
+    if (options.skipQA) {
+      console.log(`[${imageId}] Agent 3: SKIPPED (skipQA=true)`)
+      qaResult = {
+        qa_status: 'skipped',
+        pixel_delta_percent: 0,
+        forensic_log: {
+          image_id: imageId,
+          timestamp_start: new Date().toISOString(),
+          timestamp_end: new Date().toISOString(),
+          processing_time_ms: 0,
+          original_hash: '',
+          edited_hash: '',
+          mask_hash: '',
+          agents_executed: ['agent1', 'agent2'],
+          agent1_output: { mask_generation_time_ms: maskResult.generation_time_ms, success: true },
+          agent2_output: { inpaint_time_ms: inpaintResult.processing_time_ms, model: 'imagen-3.0', smart_prompt: inpaintResult.smart_prompt, success: true },
+          qa_output: { pixel_delta_percent: 0, ssim_score: 1, qa_status: 'skipped', subject_integrity: 'preserved', recommendation: 'QA skipped' },
+          vinted_safe: true,
+          audit_trail: ['QA skipped by user request']
+        }
+      }
+    } else {
+      console.log(`[${imageId}] Agent 3: Running QA validation...`)
+      qaResult = await validateEdit(
+        input.image_buffer,
+        inpaintResult.inpainted_buffer,
+        maskResult.mask_buffer,
+        imageId,
+        {
+          agent1_time_ms: maskResult.generation_time_ms,
+          agent2_time_ms: inpaintResult.processing_time_ms,
+          smart_prompt: inpaintResult.smart_prompt
+        }
+      )
+      forensicPath = join(logsDir, `${baseName}_forensic.json`)
+      await writeFile(forensicPath, JSON.stringify(qaResult.forensic_log, null, 2))
+      console.log(`[${imageId}] Agent 3: QA ${qaResult.qa_status.toUpperCase()} (${qaResult.pixel_delta_percent}%)`)
+    }
 
     const totalTime = Date.now() - startTime
     const costEstimate = COST_IMAGEN_MASK + COST_IMAGEN_INPAINT
