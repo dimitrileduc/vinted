@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { writeFile, mkdir } from 'fs/promises'
+import { writeFile, mkdir, readFile } from 'fs/promises'
 import { join } from 'path'
 import { generateMask } from './agents/agent1-removebg'
 import { inpaintBackground } from './agents/agent2-inpaint'
@@ -55,11 +55,19 @@ export async function processImage(
     await writeFile(maskPath, maskResult.mask_buffer)
     console.log(`[${imageId}] Agent 1: Mask saved (${maskResult.generation_time_ms}ms)`)
 
+    // ===== LOAD STATIC STUDIO REFERENCE =====
+    console.log(`[${imageId}] Loading static studio reference...`)
+    const studioRefPath = join(process.cwd(), 'public', 'studio-ref.jpg')
+    const studioBuffer = await readFile(studioRefPath)
+    const studioPath = studioRefPath // Chemin vers l'image statique
+    console.log(`[${imageId}] Studio ref loaded: ${(studioBuffer.length / 1024).toFixed(1)} KB`)
+
     // ===== AGENT 2: Inpaint Background =====
     console.log(`[${imageId}] Agent 2: Inpainting background...`)
     const inpaintResult = await inpaintBackground(
       input.image_buffer,
       maskResult.mask_buffer,
+      studioBuffer,
       config.gcpProjectId,
       config.gcpLocation
     )
@@ -122,6 +130,7 @@ export async function processImage(
       original_path: input.image_name,
       edited_path: editedPath,
       mask_path: maskPath,
+      studio_path: studioPath,
       forensic_path: forensicPath,
       forensic_log: qaResult.forensic_log,
       total_time_ms: totalTime,
@@ -137,6 +146,7 @@ export async function processImage(
       original_path: input.image_name,
       edited_path: '',
       mask_path: '',
+      studio_path: '',
       forensic_path: '',
       forensic_log: {} as any,
       total_time_ms: totalTime,

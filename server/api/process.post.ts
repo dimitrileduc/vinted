@@ -71,9 +71,11 @@ export default defineEventHandler(async (event) => {
 
   // Return result with base64 encoded images for frontend display
   const fs = await import('fs')
+  const path = await import('path')
 
   let editedBase64 = ''
   let maskBase64 = ''
+  let studioBase64 = ''
 
   try {
     if (result.edited_path) {
@@ -84,6 +86,10 @@ export default defineEventHandler(async (event) => {
       const maskBuffer = fs.readFileSync(result.mask_path)
       maskBase64 = maskBuffer.toString('base64')
     }
+    // Charger l'image de référence statique
+    const studioRefPath = path.join(process.cwd(), 'public', 'studio-ref.jpg')
+    const studioBuffer = fs.readFileSync(studioRefPath)
+    studioBase64 = studioBuffer.toString('base64')
   } catch (e) {
     // Files might not exist if processing failed
   }
@@ -93,6 +99,7 @@ export default defineEventHandler(async (event) => {
     image_id: result.image_id,
     edited_image: editedBase64 ? `data:image/jpeg;base64,${editedBase64}` : null,
     mask_image: maskBase64 ? `data:image/png;base64,${maskBase64}` : null,
+    studio_image: studioBase64 ? `data:image/jpeg;base64,${studioBase64}` : null,
     forensic_log: result.forensic_log,
     processing_time_ms: result.total_time_ms,
     cost_estimate: result.cost_estimate,

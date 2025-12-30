@@ -66,6 +66,7 @@ export interface PipelineResult {
   original_path: string
   edited_path: string
   mask_path: string
+  studio_path: string
   forensic_path: string
   forensic_log: ForensicLog
   total_time_ms: number

@@ -46,12 +46,16 @@
           </span>
           <span class="step-arrow">→</span>
           <span :class="['step', { active: currentStep >= 2, done: currentStep > 2 }]">
-            {{ currentStep > 2 ? '✅' : '🎨' }} Agent 2: Inpaint
+            {{ currentStep > 2 ? '✅' : '🎨' }} Studio Gen
+          </span>
+          <span class="step-arrow">→</span>
+          <span :class="['step', { active: currentStep >= 3, done: currentStep > 3 }]">
+            {{ currentStep > 3 ? '✅' : '🖼️' }} Agent 2: Inpaint
           </span>
           <template v-if="!skipQA">
             <span class="step-arrow">→</span>
-            <span :class="['step', { active: currentStep >= 3, done: currentStep > 3 }]">
-              {{ currentStep > 3 ? '✅' : '🔍' }} Agent 3: QA
+            <span :class="['step', { active: currentStep >= 4, done: currentStep > 4 }]">
+              {{ currentStep > 4 ? '✅' : '🔍' }} Agent 3: QA
             </span>
           </template>
         </div>
@@ -69,7 +73,7 @@
               <span class="time">{{ result.processing_time_ms }}ms</span>
             </div>
 
-            <div class="images-comparison-3">
+            <div class="images-comparison-4">
               <div class="image-container">
                 <p>1. Original</p>
                 <img v-if="result.original_preview" :src="result.original_preview" alt="Original" />
@@ -80,7 +84,12 @@
                 <p v-else class="no-image">No mask</p>
               </div>
               <div class="image-container">
-                <p>3. Edited (Agent 2)</p>
+                <p>3. Studio Ref</p>
+                <img v-if="result.studio_image" :src="result.studio_image" alt="Studio Background" />
+                <p v-else class="no-image">No studio</p>
+              </div>
+              <div class="image-container">
+                <p>4. Edited (Agent 2)</p>
                 <img v-if="result.edited_image" :src="result.edited_image" alt="Edited" />
                 <p v-else class="no-image">No output</p>
               </div>
@@ -130,6 +139,7 @@ interface ProcessResult {
   success: boolean
   edited_image: string | null
   mask_image: string | null
+  studio_image: string | null
   original_preview: string
   forensic_log: any
   processing_time_ms: number
@@ -193,10 +203,11 @@ async function processFiles(files: File[]) {
 
       // Simulate step progression (API is synchronous)
       const stepTimer = setInterval(() => {
-        if (currentStep.value < 3) {
+        const maxStep = skipQA.value ? 3 : 4
+        if (currentStep.value < maxStep) {
           currentStep.value++
         }
-      }, 8000) // Each step ~8s
+      }, 6000) // Each step ~6s
 
       const response = await fetch(`/api/process${skipQA.value ? '?skipQA=true' : ''}`, {
         method: 'POST',
@@ -204,7 +215,7 @@ async function processFiles(files: File[]) {
       })
 
       clearInterval(stepTimer)
-      currentStep.value = 4 // Done
+      currentStep.value = skipQA.value ? 4 : 5 // Done
 
       if (!response.ok) {
         const error = await response.json()
@@ -224,6 +235,7 @@ async function processFiles(files: File[]) {
         success: false,
         edited_image: null,
         mask_image: null,
+        studio_image: null,
         original_preview: await fileToDataUrl(file),
         forensic_log: { error: error instanceof Error ? error.message : 'Unknown error' },
         processing_time_ms: 0,
@@ -472,6 +484,13 @@ header p {
 .images-comparison-3 {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.images-comparison-4 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
   gap: 1rem;
   margin-bottom: 1rem;
 }

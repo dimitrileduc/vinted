@@ -1,5 +1,4 @@
 import { PredictionServiceClient, helpers } from '@google-cloud/aiplatform'
-import { VertexAI } from '@google-cloud/vertexai'
 import sharp from 'sharp'
 import type { InpaintResult } from '../types/pipeline'
 
@@ -9,67 +8,10 @@ const MAX_OUTPAINT_DIMENSION = 2048
 // Vinted ratio 2:3 (portrait)
 const VINTED_RATIO = 1.5 // height / width
 
-const DEFAULT_PROMPT = "Warm honey-toned herringbone parquet floor catching soft afternoon light, cream plastered walls with subtle texture, cozy lived-in Parisian apartment atmosphere, gentle natural shadows"
-
-// 🧠 Cerveau: Gemini analyse l'image et génère un prompt adapté
-async function generateSmartPrompt(
-  imageBuffer: Buffer,
-  projectId: string,
-  location: string
-): Promise<string> {
-  const vertexAI = new VertexAI({ project: projectId, location })
-  const model = vertexAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
-
-  const result = await model.generateContent({
-    contents: [{
-      role: 'user',
-      parts: [
-        {
-          inlineData: {
-            data: imageBuffer.toString('base64'),
-            mimeType: 'image/jpeg'
-          }
-        },
-        {
-          text: `You are a creative director for Vinted resale photos. Generate a UNIQUE cozy home background.
-
-RULES:
-- Do NOT describe the current background - create something NEW
-- Be CREATIVE and VARIED - never just "oak parquet + white walls"
-- AUTHENTIC home feel (real apartment, not photo studio)
-- Match the product style/vibe
-
-FLOOR OPTIONS (pick one, be specific):
-Herringbone parquet, whitewashed pine planks, polished concrete, hexagonal terracotta tiles, natural sisal rug on wood, soft sheepskin on floor, rumpled linen bedding, woven jute mat, vintage Persian rug corner
-
-LIGHTING OPTIONS (be evocative):
-Golden hour streaming through window, soft overcast afternoon, warm morning sunbeams with shadow patterns, diffused north-facing window, cozy evening ambient glow
-
-STYLE MOODS:
-- Streetwear/urban → raw concrete, industrial loft, minimal and edgy
-- Luxury/designer → cream marble, Parisian elegance, refined simplicity
-- Vintage/retro → aged honey oak, warm amber tones, lived-in charm
-- Casual/basics → soft natural textiles, Scandinavian hygge
-- Sportswear → bright airy space, clean energetic minimalism
-
-Output 25-35 words describing the complete scene. Be specific, evocative, unique.
-
-Examples:
-"Honey-toned herringbone parquet catching golden afternoon light, soft shadows from window blinds, cream plastered walls, cozy Parisian apartment atmosphere with lived-in warmth"
-"Raw polished concrete floor in minimalist loft, large industrial windows casting diffused overcast daylight, touches of warm wood, urban Scandinavian aesthetic"
-"Soft rumpled cream linen as backdrop, gentle morning light filtering through sheer curtains, intimate cozy bedroom with natural earthy tones"`
-        }
-      ]
-    }]
-  })
-
-  const text = result.response.candidates?.[0]?.content?.parts?.[0]?.text
-  return text?.trim() || DEFAULT_PROMPT
-}
-
 export async function inpaintBackground(
   originalBuffer: Buffer,
   maskBuffer: Buffer,
+  studioRefBuffer: Buffer,
   projectId: string,
   location: string = 'us-central1'
 ): Promise<InpaintResult> {
@@ -82,20 +24,9 @@ export async function inpaintBackground(
   console.log(`   🌍 Location: ${location}`)
 
   try {
-    // 1. 🧠 Cerveau: Gemini génère le prompt intelligent
-    let finalPrompt: string
-    console.log(`   🧠 Step 1: Generating smart prompt with Gemini 1.5 Flash...`)
-    try {
-      finalPrompt = await generateSmartPrompt(originalBuffer, projectId, location)
-      console.log(`   ✅ Smart Prompt: "${finalPrompt}"`)
-    } catch (e) {
-      console.warn(`   ⚠️  Smart prompt failed: ${e instanceof Error ? e.message : 'Unknown'}`)
-      console.log(`   📝 Using default prompt`)
-      finalPrompt = DEFAULT_PROMPT
-    }
-
-    // 2. 🎨 Peintre: Imagen 3 fait l'inpainting
-    console.log(`   🎨 Step 2: Sending to Imagen 3 for inpainting...`)
+    // 1. 🎨 Imagen 3 inpainting avec studio reference
+    console.log(`   🎨 Step 1: Sending to Imagen 3 for inpainting...`)
+    console.log(`   📦 Studio ref: ${(studioRefBuffer.length / 1024).toFixed(1)} KB`)
     const client = new PredictionServiceClient({
       apiEndpoint: `${location}-aiplatform.googleapis.com`,
       clientConfig: {
@@ -116,9 +47,10 @@ export async function inpaintBackground(
 
     const originalBase64 = originalBuffer.toString('base64')
     const maskBase64 = maskBuffer.toString('base64')
+    const studioRefBase64 = studioRefBuffer.toString('base64')
 
-    // Prompt enrichi pour Imagen: on lui dit de CRÉER un nouveau fond, pas de copier l'existant
-    const imagenPrompt = `Generate a completely NEW background. Do NOT replicate or copy the existing background. Create: ${finalPrompt}`
+    // Prompt simple référençant l'image studio [3]
+    const imagenPrompt = `Replace the background with a professional product photography setup matching the aesthetic style and lighting of reference image [3]. Preserve the product exactly as it is. Do not modify the product.`
 
     const instance = helpers.toValue({
       prompt: imagenPrompt,
@@ -136,6 +68,11 @@ export async function inpaintBackground(
             maskMode: 'MASK_MODE_USER_PROVIDED',
             dilation: 0.0 // Pas de dilation pour préserver les bords
           }
+        },
+        {
+          referenceType: 'REFERENCE_TYPE_STYLE',
+          referenceId: 3,
+          referenceImage: { bytesBase64Encoded: studioRefBase64 }
         }
       ]
     })
@@ -263,7 +200,7 @@ export async function inpaintBackground(
     console.log(`   📤 Calling Imagen 3 for outpainting...`)
 
     const outpaintInstance = helpers.toValue({
-      prompt: finalPrompt, // Réutilise le même prompt
+      prompt: imagenPrompt, // Réutilise le même prompt avec studio ref [3]
       referenceImages: [
         {
           referenceType: 'REFERENCE_TYPE_RAW',
@@ -322,8 +259,8 @@ export async function inpaintBackground(
       edited_base64: finalBase64,
       inpainted_buffer: inpaintedBuffer,
       processing_time_ms: processingTime,
-      model_version: 'imagen-3.0 + gemini-2.0-flash + outpaint',
-      smart_prompt: finalPrompt,
+      model_version: 'imagen-3.0 + nano-banana-studio-ref + outpaint',
+      smart_prompt: 'Studio reference from Nano Banana Pro',
       success: true
     }
 
